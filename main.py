@@ -2,18 +2,20 @@ import asyncio
 from datetime import datetime, timedelta
 import logging
 import sys
+import cv2
 
 from aiogram import Bot, Dispatcher, types, F
 import pyodbc
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.types import ContentType
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.methods import DeleteWebhook
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from config import TOKEN_API, SQL_SERVER
 import asyncio
-from commands import get_all_calls, get_doctor, get_call, ending_call, finding_amb, get_priems, get_priems_count, get_available_priems, create_priem, get_all_doctors, get_doc_byname, get_amb_bypolis
+from commands import get_all_calls, get_doctor, get_call, create_uved , ending_call, finding_amb, get_priems, get_priems_count, get_available_priems, create_priem, get_all_doctors, get_doc_byname, get_amb_bypolis
 
 class DoctorState(StatesGroup):
     polis_input = State()
@@ -33,6 +35,10 @@ class DoctorState(StatesGroup):
     polisOK_input = State()
     again_input = State()
     end_input = State()
+
+class DoctorUved(StatesGroup):
+    wait_doc = State()
+    wait_mes = State()
 
 class AuthState(StatesGroup):
     qr_input = State()
@@ -60,8 +66,9 @@ datas = { 1: "09:00", 2: "09:30", 3: "10:00", 4: "10:30", 5: "11:00", 6: "11:30"
 
 #Кнопки для доктора
 btn1 = types.KeyboardButton(text="Вызовы 🌡")
+btn2 = types.KeyboardButton(text="Уведомление ✉️")
 
-doc_kb = [ [btn1] ]
+doc_kb = [ [btn1], [btn2] ]
 
 doc_ikb = types.ReplyKeyboardMarkup(keyboard=doc_kb, resize_keyboard=True)
 
@@ -78,17 +85,29 @@ async def help_cmd(message: types.Message, state: FSMContext):
     await bot.send_message(chat_id=message.from_user.id, text="Здравствуйте! Пожалуйста, просканируйте свой QR-Код, чтобы войти в свою систему:")
     await state.set_state(AuthState.qr_input)
 
-@dp.message(AuthState.qr_input)
+@dp.message(AuthState.qr_input,F.content_type == ContentType.PHOTO)
 async def qr_cmd(message: types.Message, state: FSMContext):
+    file_name = f"qrs/{message.photo[-1].file_id}.jpg"
+    await bot.download(message.photo[-1], destination=file_name)
+    ph = cv2.imread(file_name)
+    scale_percent = 20
+    width = int(ph.shape[1] * scale_percent / 100)
+    height = int(ph.shape[0] * scale_percent / 100)
+    dim = (width, height)
+    resized_ph = cv2.resize(ph, dim)
+    detector = cv2.QRCodeDetector()
+    val, a, v = detector.detectAndDecode(resized_ph)
+    await state.update_data(id_number=val)
+    auth_data = await state.get_data()
     try:
-        doctor = await get_doctor(int(message.text))
+        doctor = await get_doctor(int(auth_data['id_number']))
         for i in doctor:
             result.append(i.doctor_id)
             result.append(i.name)
             result.append(i.password)
+            await state.update_data(doc_id=i.doctor_id)
         print(result)
         if len(result) != 0:
-            await state.update_data(doc_id=message.text)
             await bot.send_message(text="Напишите Пароль:", chat_id=message.from_user.id)
             await state.set_state(AuthState.password_input)
         else:
@@ -104,12 +123,22 @@ async def doctor_password_cmd(message: types.Message, state: FSMContext):
         await state.set_state(AuthState.auth_input)
     else:
         await bot.send_message(text="Неправильный пароль, попробуйте еще раз:", chat_id=message.from_user.id)
+@dp.message(F.text == "commands")
+async def backin(message: types.Message, state: FSMContext):
+    try:
+        await bot.send_message(text=f"добро пожаловать {result[1]}", chat_id=message.from_user.id, reply_markup=doc_ikb)
+        await state.set_state(AuthState.auth_input)
+    except:
+        await bot.send_message(text="Вы не вошли в систему, напишите /doctor:", chat_id=message.from_user.id)
+
 
 @dp.message(F.text == "Вызовы 🌡")
 async def doctor_call_cmd(message: types.Message, state:FSMContext):
     doc_data = await state.get_data()
     call_kb = []
     all_calls = await get_all_calls(doc_data["doc_id"])
+    btn2 = types.KeyboardButton(text=f"Назад")
+    call_kb.append([btn2])
     for i in all_calls:
         btn1 = types.KeyboardButton(text=f"{i.pacient}")
         call_kb.append([btn1])
@@ -130,6 +159,7 @@ async def acall_doctor_cmd(message: types.Message, state: FSMContext):
     btn2 = types.KeyboardButton(text="Назад")
     pacient_kb = [ [btn1, btn2] ]
     pac_ikb = types.ReplyKeyboardMarkup(keyboard=pacient_kb, resize_keyboard=True)
+
     if pacient:
         await bot.send_message(text=f"Пациент: {pacient[0]}\n Жалоба пациента: {pacient[1]}\n Адрес: {pacient[2]}", chat_id=message.from_user.id, reply_markup=pac_ikb)
         await state.set_state(AuthState.pacient_input)
@@ -153,6 +183,42 @@ async  def end_call_cmd(message: types.Message, state: FSMContext):
         await doctor_call_cmd(message, state)
     except:
         await bot.send_message(text="Произошла ошибка", chat_id=message.from_user.id)
+
+
+@dp.message(F.text == "Уведомление ✉️")
+async def doctor_uved_cmd(message: types.Message, state:FSMContext):
+    all_docs = await get_all_doctors()
+    btn = types.KeyboardButton(text="Назад")
+    akb = []
+    akb.append([btn])
+    for i in all_docs:
+        btn = types.KeyboardButton(text=str(i.name))
+        akb.append([btn])
+    call_ikb = types.ReplyKeyboardMarkup(keyboard=akb, resize_keyboard=True)
+    await bot.send_message(chat_id=message.from_user.id, text="Выберите, кому написать сообщение"
+                                                              "\nУведомление придет в приложение пользователю:", reply_markup=call_ikb)
+    await state.set_state(DoctorUved.wait_doc)
+
+@dp.message(DoctorUved.wait_doc)
+async def send_mes(message: types.Message, state: FSMContext):
+    await state.update_data(doc=message.text)
+    doc_ide = await get_doc_byname(message.text)
+    await state.update_data(doc_id=doc_ide)
+    await bot.send_message(text="напишите сообщение:", chat_id=message.from_user.id)
+    await state.set_state(DoctorUved.wait_mes)
+
+@dp.message(DoctorUved.wait_mes)
+async def send_mes_fin(message: types.Message, state: FSMContext):
+    try:
+        await state.update_data(mess=message.text)
+        call_data = await state.get_data()
+        print(call_data['doc_id'])
+        print(call_data['mess'])
+        await create_uved(call_data['doc_id'], call_data['mess'])
+        await bot.send_message(text="Успешно", chat_id=message.from_user.id)
+    except:
+        await bot.send_message(text="Произошла ошибка!", chat_id=message.from_user.id)
+
 
 #-----------------------------------------------Client Functions--------------------------------------------------------
 @dp.message(F.text == "Запись 📝")

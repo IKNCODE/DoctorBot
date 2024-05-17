@@ -205,6 +205,22 @@ async def create_priem(doc_id, pac, date_zap,rep):
     cursor.commit()
     conn.close()
 
+async def create_uved(doc_id, mess):
+    conn = pyodbc.connect(
+        'DRIVER={ODBC Driver 17 for SQL Server};SERVER=DESKTOP-OC4UNCB;DATABASE=DistrictDat;Trusted_Connection=yes;')
+    cursor = conn.cursor()
+    cursor.execute(f"""
+        INSERT INTO Уведомления
+           (Информация
+           ,Сотрудник
+           )
+     VALUES
+           ('{mess}'
+           ,{int(doc_id)})
+        """)
+    cursor.commit()
+    conn.close()
+
 async def finding_amb(amb_card: int):
     with pyodbc.connect(SQL_SERVER) as db:
         amb = []
