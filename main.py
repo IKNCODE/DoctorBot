@@ -55,10 +55,9 @@ conn = pyodbc.connect(SQL_SERVER)
 
 #Кнопки команды /help
 btn1 = types.KeyboardButton(text="Вызов врача 🌡")
-btn2 = types.KeyboardButton(text="Мед. карта 🗂")
 btn3 = types.KeyboardButton(text="Запись 📝")
 
-kb = [ [btn1, btn2, btn3] ]
+kb = [ [btn1, btn3] ]
 
 ikb = types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
@@ -73,6 +72,10 @@ doc_kb = [ [btn1], [btn2] ]
 doc_ikb = types.ReplyKeyboardMarkup(keyboard=doc_kb, resize_keyboard=True)
 
 result = []
+
+@dp.message(Command("start"))
+async def help_cmd(message: types.Message):
+    await bot.send_message(chat_id=message.from_user.id, text="Выберите команду:", reply_markup=ikb)
 
 @dp.message(Command("help"))
 async def help_cmd(message: types.Message):
@@ -464,18 +467,6 @@ async def process_btn_func(callback_query: types.CallbackQuery):
     await bot.send_message(callback_query.from_user.id, f'Нажата инлайн кнопка! code={code}')
 
 
-@dp.message(Command("start"))
-async def hi(message : types.Message):
-    conn = pyodbc.connect(
-        'DRIVER={ODBC Driver 17 for SQL Server};SERVER=DESKTOP-OC4UNCB;DATABASE=DistrictDat;Trusted_Connection=yes;')
-    cursor = conn.cursor()
-    cursor.execute("""
-    SELECT ФИО FROM Амбулаторная_карта
-    """)
-    row = cursor.fetchall()
-    for i in range(len(row)):
-        await bot.send_message(text=row[i][0], chat_id=message.from_user.id)
-    conn.close()
 
 async def main() -> None:
     await bot(DeleteWebhook(drop_pending_updates=True))
